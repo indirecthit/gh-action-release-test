@@ -1,0 +1,26 @@
+name: Clear Code Freeze Labels on Production PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [production]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  clear:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove DO-NOT-MERGE from all open PRs to main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const labelName = "DO-NOT-MERGE";
+            const mainPRs = await github.paginate(github.rest.pulls.list, {owner, repo, state: "open", base: "main", per_page: 100});
+            for (const pr of mainPRs) {
+              try { await github.rest.issues.removeLabel({owner, repo, issue_number: pr.number, name: labelName}); } catch {}
+            }

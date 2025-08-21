@@ -1,0 +1,31 @@
+name: Apply Code Freeze on Production PR Open
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    branches: [production]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add DO-NOT-MERGE to all open PRs to main if any PR to production is open
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const labelName = "DO-NOT-MERGE";
+            // ensure label exists
+            try { await github.rest.issues.getLabel({owner, repo, name: labelName}); }
+            catch { await github.rest.issues.createLabel({owner, repo, name: labelName, color: "d73a4a", description: "Freeze while a production PR is open"}); }
+            // if ANY open PR to production exists, label all open PRs to main
+            const prodPRs = await github.paginate(github.rest.pulls.list, {owner, repo, state: "open", base: "production", per_page: 100});
+            if (prodPRs.length === 0) { return; }
+            const mainPRs = await github.paginate(github.rest.pulls.list, {owner, repo, state: "open", base: "main", per_page: 100});
+            for (const pr of mainPRs) {
+              await github.rest.issues.addLabels({owner, repo, issue_number: pr.number, labels: [labelName]});
+            }
