@@ -7,3 +7,7 @@ def to_title(s: str) -> str:
 
 def multiply(a, b):
     return a * b
+
+
+def square(n):
+    return n * n
