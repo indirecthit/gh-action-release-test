@@ -5,3 +5,8 @@ def test_add_basic():
 
 def test_to_title():
     assert to_title('hello world') == 'Hello World'
+
+
+def test_multiply():
+    from src.lib.utils import multiply
+    assert multiply(3, 4) == 12

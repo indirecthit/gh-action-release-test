@@ -1,0 +1,33 @@
+name: Enforce Code Freeze on Main PRs
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+    branches: [main]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add/remove DO-NOT-MERGE based on ANY open PR to production
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const prNumber = context.payload.pull_request.number;
+            const labelName = "DO-NOT-MERGE";
+            // ensure label exists
+            try { await github.rest.issues.getLabel({owner, repo, name: labelName}); }
+            catch { await github.rest.issues.createLabel({owner, repo, name: labelName, color: "d73a4a", description: "Freeze while a production PR is open"}); }
+            // ANY PR against production triggers freeze
+            const prodPRs = await github.paginate(github.rest.pulls.list, {owner, repo, state: "open", base: "production", per_page: 100});
+            const freeze = prodPRs.length > 0;
+            if (freeze) {
+              await github.rest.issues.addLabels({owner, repo, issue_number: prNumber, labels: [labelName]});
+            } else {
+              try { await github.rest.issues.removeLabel({owner, repo, issue_number: prNumber, name: labelName}); } catch {}
+            }

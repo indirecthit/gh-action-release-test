@@ -1,0 +1,99 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      hotfix_branch:
+        description: 'Optional hotfix branch name to release'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+env:
+  MAIN_BRANCH: main
+  PRODUCTION_BRANCH: production
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine release source branch (main or hotfix)
+        id: src
+        run: |
+          if [ -n "${{ github.event.inputs.hotfix_branch }}" ]; then
+            echo "branch=${{ github.event.inputs.hotfix_branch }}" >> "$GITHUB_OUTPUT"
+            echo "is_hotfix=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=${{ env.MAIN_BRANCH }}" >> "$GITHUB_OUTPUT"
+            echo "is_hotfix=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Calculate CalVer (YYYY.MM.MICRO auto)
+        id: calc
+        run: |
+          CURRENT_YEAR=$(date +%Y)
+          CURRENT_MONTH=$(date +%m)
+          DATE_PREFIX="$CURRENT_YEAR.$CURRENT_MONTH"
+          LAST=$(git tag -l "v$DATE_PREFIX.*" | sort -V | tail -1)
+          if [ -n "$LAST" ]; then
+            LAST_MICRO=$(echo "$LAST" | sed -E "s/^v$DATE_PREFIX\.([0-9]+).*$/\1/"); LAST_MICRO=${LAST_MICRO:-0}
+            NEXT_MICRO=$((LAST_MICRO+1))
+          else
+            NEXT_MICRO=1
+          fi
+          NEW_VERSION="$DATE_PREFIX.$NEXT_MICRO"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "new_tag=v$NEW_VERSION"     >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag on source branch
+        env:
+          SRC_BRANCH: ${{ steps.src.outputs.branch }}
+          NEW_TAG:    ${{ steps.calc.outputs.new_tag }}
+        run: |
+          git fetch origin "$SRC_BRANCH":"$SRC_BRANCH" || true
+          git checkout "$SRC_BRANCH"
+          git pull origin "$SRC_BRANCH" || true
+          git tag -a "$NEW_TAG" -m "Test Release $NEW_TAG"
+          git push origin "$NEW_TAG"
+          echo "Tagged $NEW_TAG on $SRC_BRANCH"
+
+      - name: Open release PR (source -> production)
+        env:
+          GH_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+          SRC_BRANCH: ${{ steps.src.outputs.branch }}
+          NEW_VERSION: ${{ steps.calc.outputs.new_version }}
+        run: |
+          gh pr create \
+            --base "$PRODUCTION_BRANCH" \
+            --head "$SRC_BRANCH" \
+            --title "🚀 Test Release v${NEW_VERSION}" \
+            --body  "Automated test release (YYYY.MM.MICRO auto) from ${SRC_BRANCH}"
+          echo "Release PR opened"
+
+      - name: If hotfix, also open PR (hotfix -> main)
+        if: steps.src.outputs.is_hotfix == 'true'
+        env:
+          GH_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+          SRC_BRANCH: ${{ steps.src.outputs.branch }}
+        run: |
+          gh pr create \
+            --base "$MAIN_BRANCH" \
+            --head "$SRC_BRANCH" \
+            --title "🔧 Hotfix sync: ${SRC_BRANCH} → main" \
+            --body  "Sync hotfix branch into main"
+          echo "Hotfix→main PR opened"
